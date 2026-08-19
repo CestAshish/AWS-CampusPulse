@@ -1,7 +1,14 @@
 import json
 import os
 import boto3
+from decimal import Decimal
 from boto3.dynamodb.conditions import Key
+
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, Decimal):
+            return int(obj) if obj % 1 == 0 else float(obj)
+        return super(DecimalEncoder, self).default(obj)
 
 dynamodb = boto3.resource('dynamodb', region_name='eu-north-1')
 table = dynamodb.Table(os.environ['TABLE_NAME'])
@@ -22,7 +29,7 @@ def lambda_handler(event, context):
                 'building_id': building_id,
                 'total_events': len(response.get('Items', [])),
                 'data': response.get('Items', [])
-            })
+            }, cls=DecimalEncoder)
         }
     except Exception as e:
         return {
