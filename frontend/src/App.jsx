@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { getCurrentUser, fetchAuthSession } from 'aws-amplify/auth';
+import { getCurrentUser, fetchAuthSession, signOut } from 'aws-amplify/auth';
 import Login from './Login.jsx';
 
 const API_URL = "https://w1k2uj34k5.execute-api.eu-north-1.amazonaws.com/prod";
@@ -217,7 +217,14 @@ function App() {
     }} />;
   }
 
-  return <Dashboard onLogout={() => setIsLoggedIn(false)} userEmail={userEmail} />;
+  return <Dashboard onLogout={async () => {
+    try {
+      await signOut();
+      setIsLoggedIn(false);
+    } catch (error) {
+      console.error('Error signing out:', error);
+    }
+  }} userEmail={userEmail} />;
 }
 
 export default App;
