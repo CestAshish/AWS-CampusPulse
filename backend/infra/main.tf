@@ -3,7 +3,7 @@ terraform {
     aws = { source = "hashicorp/aws", version = "~> 5.0" }
   }
   backend "s3" {
-    bucket = "campuspulse-tf-state-2026" # Ensure this matches Rayyan's bucket name
+    bucket = "campuspulse-tfstate-2026" # Ensure this matches Rayyan's bucket name
     key    = "state/terraform.tfstate"
     region = "eu-north-1"
   }
