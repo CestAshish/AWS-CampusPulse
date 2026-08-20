@@ -69,7 +69,7 @@ function Login({ onLogin }) {
 
         <div className="login-header">
           <h1>{needsNewPassword ? "Update Password" : "Welcome to CampusPulse"}</h1>
-          <p>{needsNewPassword ? "AWS requires you to set a permanent password." : "Sign in to your account"}</p>
+          <p>{needsNewPassword ? "AWS requires you to update your password." : "Sign in to your account"}</p>
         </div>
 
         <form className="login-form" onSubmit={handleSubmit}>
@@ -89,7 +89,7 @@ function Login({ onLogin }) {
               </div>
 
               <div className="form-group">
-                <label htmlFor="password">Temporary Password</label>
+                <label htmlFor="password">Password</label>
                 <input
                   id="password"
                   type={showPassword ? "text" : "password"}
@@ -103,7 +103,7 @@ function Login({ onLogin }) {
           ) : (
             <>
               <div className="form-group">
-                <label htmlFor="new-password">New Permanent Password</label>
+                <label htmlFor="new-password">New Password</label>
                 <input
                   id="new-password"
                   type={showPassword ? "text" : "password"}
