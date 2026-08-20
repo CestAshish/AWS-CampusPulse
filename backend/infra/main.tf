@@ -14,12 +14,21 @@ provider "aws" {
 }
 
 data "aws_vpc" "campuspulse" {
-  filter { name = "tag:Name", values = ["CampusPulse-VPC"] }
+  filter {
+    name   = "tag:Name"
+    values = ["CampusPulse-VPC"]
+  }
 }
 
 data "aws_subnets" "private" {
-  filter { name = "vpc-id", values = [data.aws_vpc.campuspulse.id] }
-  filter { name = "tag:Name", values = ["*private*"] }
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.campuspulse.id]
+  }
+  filter {
+    name   = "tag:Name"
+    values = ["*private*"]
+  }
 }
 
 data "aws_security_group" "default" {
