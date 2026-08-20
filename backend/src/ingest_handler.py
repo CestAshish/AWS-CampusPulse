@@ -4,6 +4,7 @@ import boto3
 from datetime import datetime
 
 dynamodb = boto3.resource('dynamodb', region_name='eu-north-1')
+cloudwatch = boto3.client('cloudwatch', region_name='eu-north-1')
 table = dynamodb.Table(os.environ['TABLE_NAME'])
 
 def lambda_handler(event, context):
@@ -21,6 +22,27 @@ def lambda_handler(event, context):
         }
         
         table.put_item(Item=item)
+
+        cloudwatch.put_metric_data(
+            Namespace='CampusPulse',
+            MetricData=[
+                {
+                    'MetricName': 'OccupancyCount',
+                    'Value': body.get('occupancy_count', 0),
+                    'Unit': 'Count'
+                },
+                {
+                    'MetricName': 'Temperature',
+                    'Value': body.get('temperature_c', 0),
+                    'Unit': 'None'
+                },
+                {
+                    'MetricName': 'EnergyUsage',
+                    'Value': body.get('energy_kwh', 0),
+                    'Unit': 'None'
+                }
+            ]
+        )
         
         return {
             'statusCode': 201,
