@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
+﻿import { useState, useEffect, useRef } from 'react';
 import { getCurrentUser, fetchAuthSession, signOut } from 'aws-amplify/auth';
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import Login from './Login.jsx';
 
 const API_URL = "https://w1k2uj34k5.execute-api.eu-north-1.amazonaws.com/prod";
@@ -34,8 +34,6 @@ function Dashboard({ onLogout, userEmail }) {
           const data = await res.json();
           if (data.data && data.data.length > 0) {
             const sorted = data.data.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-            
-            // Get last 30 entries to ensure we have enough data points
             const recentData = sorted.slice(-40);
 
             const chartData = [];
@@ -90,46 +88,61 @@ function Dashboard({ onLogout, userEmail }) {
       setSimLog("Simulator Paused.");
     } else {
       setSimulating(true);
-      injectRandomEvent();
-      simIntervalRef.current = setInterval(injectRandomEvent, 2000); 
+      injectAllEvents();
+      // Blast all 15 every 4 seconds
+      simIntervalRef.current = setInterval(injectAllEvents, 4000); 
     }
   };
 
-  const injectRandomEvent = async () => {
+  const injectAllEvents = async () => {
     if (!jwtToken) return;
-    const bldg = BUILDINGS[Math.floor(Math.random() * BUILDINGS.length)];
-    const type = EVENT_TYPES[Math.floor(Math.random() * EVENT_TYPES.length)];
     
-    const payload = {
-      building_id: bldg,
-      event_type: type,
-      timestamp: new Date().toISOString()
-    };
+    setSimLog(`Transmitting data for all 15 sensors simultaneously...`);
+    const promises = [];
 
-    if (type === 'temperature') {
-      payload.temperature_c = (18 + Math.random() * 12).toFixed(1);
-      payload.alert = payload.temperature_c > 28;
-    } else if (type === 'occupancy') {
-      payload.occupancy_count = Math.floor(Math.random() * 200);
-    } else if (type === 'energy') {
-      payload.energy_kwh = (50 + Math.random() * 100).toFixed(1);
+    for (const bldg of BUILDINGS) {
+      for (const type of EVENT_TYPES) {
+        // slight jitter so they don't hit the exact millisecond
+        const delay = Math.random() * 500;
+        const p = new Promise(resolve => {
+          setTimeout(async () => {
+            const payload = {
+              building_id: bldg,
+              event_type: type,
+              timestamp: new Date().toISOString()
+            };
+
+            if (type === 'temperature') {
+              payload.temperature_c = (18 + Math.random() * 12).toFixed(1);
+              payload.alert = payload.temperature_c > 28;
+            } else if (type === 'occupancy') {
+              // Create a smooth varying graph
+              payload.occupancy_count = Math.floor(Math.random() * 150) + 10;
+            } else if (type === 'energy') {
+              payload.energy_kwh = (50 + Math.random() * 100).toFixed(1);
+            }
+
+            try {
+              await fetch(`${API_URL}/events`, {
+                method: 'POST',
+                headers: { 
+                  'Content-Type': 'application/json',
+                  'Authorization': jwtToken
+                },
+                body: JSON.stringify(payload)
+              });
+              resolve();
+            } catch (err) {
+              resolve();
+            }
+          }, delay);
+        });
+        promises.push(p);
+      }
     }
 
-    setSimLog(`Transmitting: ${bldg} -> ${type}...`);
-
-    try {
-      await fetch(`${API_URL}/events`, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': jwtToken
-        },
-        body: JSON.stringify(payload)
-      });
-      setSimLog(`Successfully transmitted ${type} data for ${bldg} to AWS DynamoDB.`);
-    } catch (err) {
-      setSimLog(`Error transmitting to AWS: ${err.message}`);
-    }
+    await Promise.all(promises);
+    setSimLog(`Successfully transmitted 15 events to AWS DynamoDB.`);
   };
 
   useEffect(() => {
@@ -142,10 +155,15 @@ function Dashboard({ onLogout, userEmail }) {
     <div className="full-layout">
       <header className="top-navbar">
         <h2 style={{ margin: 0, color: '#f1f5f9' }}>CampusPulse</h2>
+        
         <div className="header-actions">
-          <button className="btn btn-sim-toggle" onClick={() => setShowSimPanel(!showSimPanel)}>
+          <button 
+            className="btn btn-sim-toggle" 
+            onClick={() => setShowSimPanel(!showSimPanel)}
+          >
             {showSimPanel ? 'Close Simulator' : 'IoT Simulator Tools'}
           </button>
+          
           <span className="user-email">Welcome, <strong>{userEmail}</strong></span>
           <button onClick={onLogout} className="btn btn-stop">Sign Out</button>
         </div>
