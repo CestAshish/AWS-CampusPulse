@@ -36,25 +36,17 @@ function Dashboard({ onLogout, userEmail }) {
             const sorted = data.data.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
             const recentData = sorted.slice(-40);
 
-            const chartData = [];
-            let currentTemp = 0;
-            let currentOcc = 0;
-            let currentNrg = 0;
-
+            const grouped = {};
             recentData.forEach(item => {
-              const time = new Date(item.timestamp).toLocaleTimeString([], { hour12: false, minute: '2-digit', second:'2-digit' });
-              
-              if (item.event_type === 'temperature') currentTemp = parseFloat(item.temperature_c);
-              if (item.event_type === 'occupancy') currentOcc = parseInt(item.occupancy_count);
-              if (item.event_type === 'energy') currentNrg = parseFloat(item.energy_kwh);
-
-              chartData.push({
-                time,
-                temp: currentTemp || null,
-                occ: currentOcc || null,
-                nrg: currentNrg || null
-              });
+              const time = new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+              if (!grouped[time]) {
+                grouped[time] = { time, Temperature: null, Occupancy: null, Energy: null };
+              }
+              if (item.event_type === 'temperature') grouped[time].Temperature = parseFloat(item.temperature_c);
+              if (item.event_type === 'occupancy') grouped[time].Occupancy = parseInt(item.occupancy_count);
+              if (item.event_type === 'energy') grouped[time].Energy = parseFloat(item.energy_kwh);
             });
+            const chartData = Object.values(grouped);
 
             const latestReversed = [...sorted].reverse();
             
@@ -214,9 +206,9 @@ function Dashboard({ onLogout, userEmail }) {
                           <LineChart data={chartData}>
                             <XAxis dataKey="time" hide={true} />
                             <YAxis domain={['dataMin - 2', 'dataMax + 2']} hide={true} />
-                            <Tooltip contentStyle={{ background: '#1e293b', border: 'none' }} />
+                            <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', padding: '12px 18px', fontSize: '1.1rem', borderRadius: '8px' }} />
                             <ReferenceLine y={28} stroke="#ef4444" strokeDasharray="3 3" label={{ position: 'top', value: 'Alert > 28°C', fill: '#ef4444', fontSize: 10 }} />
-                            <Line type="monotone" dataKey="temp" stroke="#fbbf24" strokeWidth={3} dot={false} isAnimationActive={false} />
+                            <Line type="monotone" dataKey="Temperature" stroke="#fbbf24" strokeWidth={3} dot={{r: 3, fill: "#fbbf24", stroke: "none"}} activeDot={{r: 6}} connectNulls={true} isAnimationActive={false} />
                           </LineChart>
                         </ResponsiveContainer>
                       </div>
@@ -233,9 +225,9 @@ function Dashboard({ onLogout, userEmail }) {
                           <LineChart data={chartData}>
                             <XAxis dataKey="time" hide={true} />
                             <YAxis domain={[0, 220]} hide={true} />
-                            <Tooltip contentStyle={{ background: '#1e293b', border: 'none' }} />
+                            <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', padding: '12px 18px', fontSize: '1.1rem', borderRadius: '8px' }} />
                             <ReferenceLine y={150} stroke="#ef4444" strokeDasharray="3 3" label={{ position: 'top', value: 'Capacity > 150', fill: '#ef4444', fontSize: 10 }} />
-                            <Line type="monotone" dataKey="occ" stroke="#60a5fa" strokeWidth={3} dot={false} isAnimationActive={false} />
+                            <Line type="monotone" dataKey="Occupancy" stroke="#60a5fa" strokeWidth={3} dot={{r: 3, fill: "#60a5fa", stroke: "none"}} activeDot={{r: 6}} connectNulls={true} isAnimationActive={false} />
                           </LineChart>
                         </ResponsiveContainer>
                       </div>
@@ -252,9 +244,9 @@ function Dashboard({ onLogout, userEmail }) {
                           <LineChart data={chartData}>
                             <XAxis dataKey="time" hide={true} />
                             <YAxis domain={['dataMin - 10', 'dataMax + 10']} hide={true} />
-                            <Tooltip contentStyle={{ background: '#1e293b', border: 'none' }} />
+                            <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', padding: '12px 18px', fontSize: '1.1rem', borderRadius: '8px' }} />
                             <ReferenceLine y={120} stroke="#ef4444" strokeDasharray="3 3" label={{ position: 'top', value: 'High > 120 kWh', fill: '#ef4444', fontSize: 10 }} />
-                            <Line type="monotone" dataKey="nrg" stroke="#10b981" strokeWidth={3} dot={false} isAnimationActive={false} />
+                            <Line type="monotone" dataKey="Energy" stroke="#10b981" strokeWidth={3} dot={{r: 3, fill: "#10b981", stroke: "none"}} activeDot={{r: 6}} connectNulls={true} isAnimationActive={false} />
                           </LineChart>
                         </ResponsiveContainer>
                       </div>
