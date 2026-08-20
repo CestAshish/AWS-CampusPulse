@@ -4,9 +4,18 @@ resource "aws_dynamodb_table" "events" {
   hash_key       = "building_id"
   range_key      = "timestamp"
 
-  attribute { name = "building_id", type = "S" }
-  attribute { name = "timestamp", type = "S" }
-  attribute { name = "event_type", type = "S" }
+  attribute {
+    name = "building_id"
+    type = "S"
+  }
+  attribute {
+    name = "timestamp"
+    type = "S"
+  }
+  attribute {
+    name = "event_type"
+    type = "S"
+  }
 
   global_secondary_index {
     name               = "EventTypeIndex"
