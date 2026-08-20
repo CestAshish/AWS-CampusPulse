@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { getCurrentUser, fetchAuthSession, signOut } from 'aws-amplify/auth';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import Login from './Login.jsx';
@@ -95,7 +95,7 @@ function Dashboard({ onLogout, userEmail }) {
     for (const bldg of BUILDINGS) {
       for (const type of EVENT_TYPES) {
         // slight jitter so they don't hit the exact millisecond
-        const delay = Math.random() * 500;
+        const delay = Math.random() * 2500;
         const p = new Promise(resolve => {
           setTimeout(async () => {
             const payload = {
