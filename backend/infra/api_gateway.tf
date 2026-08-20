@@ -71,9 +71,12 @@ resource "aws_lambda_permission" "stats_apigw" {
 # --- DEPLOYMENT ---
 resource "aws_api_gateway_deployment" "prod" {
   rest_api_id = aws_api_gateway_rest_api.campus_api.id
+  description = "Trigger deployment for CORS"
   depends_on = [
     aws_api_gateway_integration.events_lambda,
-    aws_api_gateway_integration.stats_lambda
+    aws_api_gateway_integration.stats_lambda,
+    aws_api_gateway_integration.events_options_integration,
+    aws_api_gateway_integration.stats_options_integration
   ]
 }
 
