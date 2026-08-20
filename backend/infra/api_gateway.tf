@@ -75,25 +75,7 @@ resource "aws_api_gateway_deployment" "prod" {
   rest_api_id = aws_api_gateway_rest_api.campus_api.id
   
   triggers = {
-    redeployment = sha1(jsonencode([
-      aws_api_gateway_resource.events,
-      aws_api_gateway_method.events_post,
-      aws_api_gateway_integration.events_lambda,
-      aws_api_gateway_resource.stats,
-      aws_api_gateway_method.stats_get,
-      aws_api_gateway_integration.stats_lambda,
-      aws_api_gateway_method.events_options,
-      aws_api_gateway_integration.events_options_integration,
-      aws_api_gateway_method_response.events_options_200,
-      aws_api_gateway_integration_response.events_options_integration_response,
-      aws_api_gateway_method.stats_options,
-      aws_api_gateway_integration.stats_options_integration,
-      aws_api_gateway_method_response.stats_options_200,
-      aws_api_gateway_integration_response.stats_options_integration_response,
-      aws_api_gateway_gateway_response.default_4xx,
-      aws_api_gateway_gateway_response.default_5xx,
-      aws_api_gateway_authorizer.cognito
-    ]))
+    redeployment = filemd5("${path.module}/api_gateway.tf")
   }
 
   lifecycle {
