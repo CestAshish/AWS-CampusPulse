@@ -8,6 +8,10 @@ function Login({ onLogin }) {
   // For forcing password changes
   const [needsNewPassword, setNeedsNewPassword] = useState(false);
   const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+
+  // Show password toggle
+  const [showPassword, setShowPassword] = useState(false);
 
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -15,6 +19,12 @@ function Login({ onLogin }) {
   const handleSubmit = async (event) => {
     event.preventDefault();
     setError('');
+
+    if (needsNewPassword && newPassword !== confirmPassword) {
+      setError("New passwords do not match.");
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -82,7 +92,7 @@ function Login({ onLogin }) {
                 <label htmlFor="password">Temporary Password</label>
                 <input
                   id="password"
-                  type="password"
+                  type={showPassword ? "text" : "password"}
                   placeholder="Enter your password"
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
@@ -91,18 +101,43 @@ function Login({ onLogin }) {
               </div>
             </>
           ) : (
-            <div className="form-group">
-              <label htmlFor="new-password">New Permanent Password</label>
-              <input
-                id="new-password"
-                type="password"
-                placeholder="Enter a strong password"
-                value={newPassword}
-                onChange={(event) => setNewPassword(event.target.value)}
-                required
-              />
-            </div>
+            <>
+              <div className="form-group">
+                <label htmlFor="new-password">New Permanent Password</label>
+                <input
+                  id="new-password"
+                  type={showPassword ? "text" : "password"}
+                  placeholder="Enter a strong password"
+                  value={newPassword}
+                  onChange={(event) => setNewPassword(event.target.value)}
+                  required
+                />
+              </div>
+              
+              <div className="form-group">
+                <label htmlFor="confirm-password">Confirm Password</label>
+                <input
+                  id="confirm-password"
+                  type={showPassword ? "text" : "password"}
+                  placeholder="Confirm your password"
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  required
+                />
+              </div>
+            </>
           )}
+
+          <div style={{ display: 'flex', alignItems: 'center', marginTop: '5px' }}>
+            <input 
+              type="checkbox" 
+              id="show-password" 
+              checked={showPassword} 
+              onChange={() => setShowPassword(!showPassword)} 
+              style={{ marginRight: '8px', cursor: 'pointer' }}
+            />
+            <label htmlFor="show-password" style={{ fontSize: '0.85rem', color: '#a0aec0', cursor: 'pointer' }}>Show Password</label>
+          </div>
 
           {error && (
             <p style={{ color: '#f87171', fontSize: '0.9rem', marginTop: '5px' }}>
