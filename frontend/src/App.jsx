@@ -189,7 +189,7 @@ function Dashboard({ onLogout, userEmail }) {
                     <div style={{ background: 'rgba(0,0,0,0.2)', padding: '15px', borderRadius: '8px' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
                         <span style={{ color: '#fbbf24', fontWeight: 'bold' }}>Temperature</span>
-                        <span style={{ color: '#f8fafc', fontSize: '1.2rem' }}>{lastTemp} °C</span>
+                        <span style={{ color: '#f8fafc', fontSize: '1.2rem' }}>{lastTemp} Â°C</span>
                       </div>
                       <div style={{ width: '100%', height: 180 }}>
                         <ResponsiveContainer>
@@ -197,7 +197,7 @@ function Dashboard({ onLogout, userEmail }) {
                             <XAxis dataKey="time" hide={true} />
                             <YAxis domain={['dataMin - 2', 'dataMax + 2']} hide={true} />
                             <Tooltip contentStyle={{ background: '#1e293b', border: 'none' }} />
-                            <ReferenceLine y={28} stroke="#ef4444" strokeDasharray="3 3" label={{ position: 'top', value: 'Alert > 28°C', fill: '#ef4444', fontSize: 10 }} />
+                            <ReferenceLine y={28} stroke="#ef4444" strokeDasharray="3 3" label={{ position: 'top', value: 'Alert > 28Â°C', fill: '#ef4444', fontSize: 10 }} />
                             <Line type="monotone" dataKey="temp" stroke="#fbbf24" strokeWidth={3} dot={false} isAnimationActive={false} />
                           </LineChart>
                         </ResponsiveContainer>
