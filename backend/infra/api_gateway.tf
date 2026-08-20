@@ -17,7 +17,8 @@ resource "aws_api_gateway_method" "events_post" {
   rest_api_id   = aws_api_gateway_rest_api.campus_api.id
   resource_id   = aws_api_gateway_resource.events.id
   http_method   = "POST"
-  authorization = "NONE" # We will add Cognito soon!
+  authorization = "COGNITO_USER_POOLS"
+  authorizer_id = aws_api_gateway_authorizer.cognito.id
 }
 
 resource "aws_api_gateway_integration" "events_lambda" {
@@ -48,7 +49,8 @@ resource "aws_api_gateway_method" "stats_get" {
   rest_api_id   = aws_api_gateway_rest_api.campus_api.id
   resource_id   = aws_api_gateway_resource.stats.id
   http_method   = "GET"
-  authorization = "NONE" # We will add Cognito soon!
+  authorization = "COGNITO_USER_POOLS"
+  authorizer_id = aws_api_gateway_authorizer.cognito.id
 }
 
 resource "aws_api_gateway_integration" "stats_lambda" {
@@ -71,7 +73,7 @@ resource "aws_lambda_permission" "stats_apigw" {
 # --- DEPLOYMENT ---
 resource "aws_api_gateway_deployment" "prod" {
   rest_api_id = aws_api_gateway_rest_api.campus_api.id
-  description = "Trigger deployment for CORS"
+  description = "Trigger deployment for Cognito Security Lock"
   depends_on = [
     aws_api_gateway_integration.events_lambda,
     aws_api_gateway_integration.stats_lambda,
