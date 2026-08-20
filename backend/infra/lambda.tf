@@ -1,4 +1,4 @@
-data "archive_file" "lambda_zip" {
+﻿data "archive_file" "lambda_zip" {
   type        = "zip"
   source_dir  = "${path.module}/../src"
   output_path = "${path.module}/lambda.zip"
@@ -13,11 +13,6 @@ resource "aws_lambda_function" "ingest" {
   runtime          = "python3.12"
   timeout          = 10
 
-  vpc_config {
-    subnet_ids         = data.aws_subnets.private.ids
-    security_group_ids = [data.aws_security_group.default.id]
-  }
-
   environment {
     variables = { TABLE_NAME = aws_dynamodb_table.events.name }
   }
@@ -31,11 +26,6 @@ resource "aws_lambda_function" "stats" {
   handler          = "stats_handler.lambda_handler"
   runtime          = "python3.12"
   timeout          = 10
-
-  vpc_config {
-    subnet_ids         = data.aws_subnets.private.ids
-    security_group_ids = [data.aws_security_group.default.id]
-  }
 
   environment {
     variables = { TABLE_NAME = aws_dynamodb_table.events.name }
