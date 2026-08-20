@@ -17,6 +17,10 @@ resource "aws_dynamodb_table" "events" {
     type = "S"
   }
 
+  point_in_time_recovery {
+    enabled = true
+  }
+
   global_secondary_index {
     name               = "EventTypeIndex"
     hash_key           = "event_type"
