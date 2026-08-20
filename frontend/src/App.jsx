@@ -13,11 +13,21 @@ function Dashboard({ onLogout, userEmail }) {
   const [simLog, setSimLog] = useState("System Idle. Click 'Start Live Simulator' to begin.");
   const [jwtToken, setJwtToken] = useState(null);
   const [showSimPanel, setShowSimPanel] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const simIntervalRef = useRef(null);
 
   useEffect(() => {
     fetchAuthSession().then(session => {
-      setJwtToken(session.tokens.idToken.toString());
+      const token = session.tokens.idToken.toString();
+      setJwtToken(token);
+      try {
+        // Decode the JWT payload to check Cognito groups
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        const groups = payload['cognito:groups'] || [];
+        setIsAdmin(groups.includes('Admin'));
+      } catch (e) {
+        setIsAdmin(false);
+      }
     }).catch(err => console.error("Error getting session", err));
   }, []);
 
@@ -149,12 +159,14 @@ function Dashboard({ onLogout, userEmail }) {
         <h2 style={{ margin: 0, color: '#f1f5f9' }}>CampusPulse</h2>
         
         <div className="header-actions">
-          <button 
-            className="btn btn-sim-toggle" 
-            onClick={() => setShowSimPanel(!showSimPanel)}
-          >
-            {showSimPanel ? 'Close Simulator' : 'IoT Simulator Tools'}
-          </button>
+          {isAdmin && (
+            <button 
+              className="btn btn-sim-toggle" 
+              onClick={() => setShowSimPanel(!showSimPanel)}
+            >
+              {showSimPanel ? 'Close Simulator' : 'IoT Simulator Tools'}
+            </button>
+          )}
           
           <span className="user-email">Welcome, <strong>{userEmail}</strong></span>
           <button onClick={onLogout} className="btn btn-stop">Sign Out</button>
