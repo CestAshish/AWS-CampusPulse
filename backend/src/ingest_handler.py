@@ -1,4 +1,4 @@
-import json
+﻿import json
 import os
 import boto3
 from datetime import datetime
@@ -23,26 +23,19 @@ def lambda_handler(event, context):
         
         table.put_item(Item=item)
 
-        cloudwatch.put_metric_data(
-            Namespace='CampusPulse',
-            MetricData=[
-                {
-                    'MetricName': 'OccupancyCount',
-                    'Value': body.get('occupancy_count', 0),
-                    'Unit': 'Count'
-                },
-                {
-                    'MetricName': 'Temperature',
-                    'Value': body.get('temperature_c', 0),
-                    'Unit': 'None'
-                },
-                {
-                    'MetricName': 'EnergyUsage',
-                    'Value': body.get('energy_kwh', 0),
-                    'Unit': 'None'
-                }
-            ]
-        )
+        metric_data = []
+        if 'occupancy_count' in body:
+            metric_data.append({'MetricName': 'OccupancyCount', 'Value': float(body['occupancy_count']), 'Unit': 'Count'})
+        if 'temperature_c' in body:
+            metric_data.append({'MetricName': 'Temperature', 'Value': float(body['temperature_c']), 'Unit': 'None'})
+        if 'energy_kwh' in body:
+            metric_data.append({'MetricName': 'EnergyUsage', 'Value': float(body['energy_kwh']), 'Unit': 'None'})
+            
+        if metric_data:
+            cloudwatch.put_metric_data(
+                Namespace='CampusPulse',
+                MetricData=metric_data
+            )
         
         return {
             'statusCode': 201,
