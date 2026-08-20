@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { getCurrentUser, fetchAuthSession, signOut } from 'aws-amplify/auth';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import Login from './Login.jsx';
 
 const API_URL = "https://w1k2uj34k5.execute-api.eu-north-1.amazonaws.com/prod";
@@ -34,13 +35,45 @@ function Dashboard({ onLogout, userEmail }) {
           if (!res.ok) continue;
           const data = await res.json();
           if (data.data && data.data.length > 0) {
-            const sorted = data.data.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+            // Sort oldest to newest for the chart
+            const sorted = data.data.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+            
+            // Filter to last 2 minutes (120 seconds)
+            const twoMinsAgo = new Date(Date.now() - 120 * 1000);
+            const recentData = sorted.filter(e => new Date(e.timestamp) > twoMinsAgo);
+
+            // Group by time interval (e.g. 10s buckets) to make a clean chart
+            // For simplicity, we just map the raw events into a chartable array
+            const chartData = [];
+            let currentTemp = 0;
+            let currentOcc = 0;
+            let currentNrg = 0;
+
+            recentData.forEach(item => {
+              const time = new Date(item.timestamp).toLocaleTimeString([], { hour12: false, minute: '2-digit', second:'2-digit' });
+              
+              if (item.event_type === 'temperature') currentTemp = parseFloat(item.temperature_c);
+              if (item.event_type === 'occupancy') currentOcc = parseInt(item.occupancy_count);
+              if (item.event_type === 'energy') currentNrg = parseFloat(item.energy_kwh);
+
+              chartData.push({
+                time,
+                temp: currentTemp || null,
+                occ: currentOcc || null,
+                nrg: currentNrg || null
+              });
+            });
+
+            // Get latest values for the numeric display
+            const latestReversed = [...sorted].reverse();
+            
             setStats(prev => ({
               ...prev,
               [bldg]: {
-                temp: sorted.find(e => e.event_type === 'temperature'),
-                occ: sorted.find(e => e.event_type === 'occupancy'),
-                nrg: sorted.find(e => e.event_type === 'energy'),
+                temp: latestReversed.find(e => e.event_type === 'temperature'),
+                occ: latestReversed.find(e => e.event_type === 'occupancy'),
+                nrg: latestReversed.find(e => e.event_type === 'energy'),
+                chartData: chartData,
                 lastUpdated: new Date().toLocaleTimeString()
               }
             }));
@@ -52,7 +85,7 @@ function Dashboard({ onLogout, userEmail }) {
     };
 
     fetchAllStats();
-    const fetchInterval = setInterval(fetchAllStats, 5000);
+    const fetchInterval = setInterval(fetchAllStats, 10000); // Fetch every 10 seconds
     return () => clearInterval(fetchInterval);
   }, [jwtToken]);
 
@@ -66,7 +99,7 @@ function Dashboard({ onLogout, userEmail }) {
     } else {
       setSimulating(true);
       injectRandomEvent();
-      simIntervalRef.current = setInterval(injectRandomEvent, 2000);
+      simIntervalRef.current = setInterval(injectRandomEvent, 2500); // inject randomly
     }
   };
 
@@ -153,29 +186,60 @@ function Dashboard({ onLogout, userEmail }) {
               const temp = bldgStats?.temp;
               const occ = bldgStats?.occ;
               const nrg = bldgStats?.nrg;
+              const chartData = bldgStats?.chartData || [];
 
               return (
-                <div className="tile" key={bldg}>
-                  <h3>
+                <div className="tile" key={bldg} style={{ gridColumn: 'span 1' }}>
+                  <h3 style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     {bldg} 
-                    <span className="timestamp">
-                      {bldgStats?.lastUpdated ? `Last updated: ${bldgStats.lastUpdated}` : 'Waiting for data...'}
+                    <span className="timestamp" style={{ fontSize: '0.75rem', fontWeight: 'normal' }}>
+                      {bldgStats?.lastUpdated ? `Live` : 'Waiting...'}
                     </span>
                   </h3>
-                  <div className="metric">
-                    <span className="metric-title">Temperature</span>
-                    <span className={`metric-val ${temp?.alert ? 'alert' : ''}`}>
-                      {temp ? `${temp.temperature_c} C` : '--'}
-                    </span>
+                  
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px' }}>
+                    <div className="metric" style={{ flex: 1, padding: 0, border: 'none' }}>
+                      <span className="metric-title" style={{ fontSize: '0.75rem' }}>Temp</span>
+                      <span className={`metric-val ${temp?.alert ? 'alert' : ''}`} style={{ fontSize: '1.2rem' }}>
+                        {temp ? `${temp.temperature_c} C` : '--'}
+                      </span>
+                    </div>
+                    <div className="metric" style={{ flex: 1, padding: 0, border: 'none' }}>
+                      <span className="metric-title" style={{ fontSize: '0.75rem' }}>Occupancy</span>
+                      <span className="metric-val" style={{ fontSize: '1.2rem', color: '#60a5fa' }}>
+                        {occ ? occ.occupancy_count : '--'}
+                      </span>
+                    </div>
+                    <div className="metric" style={{ flex: 1, padding: 0, border: 'none' }}>
+                      <span className="metric-title" style={{ fontSize: '0.75rem' }}>Energy</span>
+                      <span className="metric-val" style={{ fontSize: '1.2rem', color: '#10b981' }}>
+                        {nrg ? nrg.energy_kwh : '--'}
+                      </span>
+                    </div>
                   </div>
-                  <div className="metric">
-                    <span className="metric-title">Occupancy</span>
-                    <span className="metric-val">{occ ? occ.occupancy_count : '--'}</span>
+
+                  {/* The Live Chart */}
+                  <div style={{ width: '100%', height: 180, marginTop: '10px' }}>
+                    {chartData.length > 0 ? (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={chartData}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                          <XAxis dataKey="time" stroke="#94a3b8" fontSize={10} tick={{fill: '#94a3b8'}} />
+                          <YAxis stroke="#94a3b8" fontSize={10} tick={{fill: '#94a3b8'}} width={30} />
+                          <Tooltip 
+                            contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '4px', color: '#fff' }}
+                            itemStyle={{ color: '#fff' }}
+                          />
+                          <Line type="monotone" dataKey="occ" name="Occupancy" stroke="#3b82f6" strokeWidth={2} dot={false} isAnimationActive={false} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#475569' }}>
+                        No data yet
+                      </div>
+                    )}
                   </div>
-                  <div className="metric">
-                    <span className="metric-title">Energy (kWh)</span>
-                    <span className="metric-val">{nrg ? nrg.energy_kwh : '--'}</span>
-                  </div>
+
                 </div>
               );
             })}
