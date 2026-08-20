@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { getCurrentUser, fetchAuthSession, signOut } from 'aws-amplify/auth';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import Login from './Login.jsx';
 
 const API_URL = "https://w1k2uj34k5.execute-api.eu-north-1.amazonaws.com/prod";
@@ -15,14 +15,12 @@ function Dashboard({ onLogout, userEmail }) {
   const [showSimPanel, setShowSimPanel] = useState(false);
   const simIntervalRef = useRef(null);
 
-  // Fetch JWT Token on mount
   useEffect(() => {
     fetchAuthSession().then(session => {
       setJwtToken(session.tokens.idToken.toString());
     }).catch(err => console.error("Error getting session", err));
   }, []);
 
-  // Fetch Stats Loop
   useEffect(() => {
     if (!jwtToken) return;
 
@@ -35,15 +33,11 @@ function Dashboard({ onLogout, userEmail }) {
           if (!res.ok) continue;
           const data = await res.json();
           if (data.data && data.data.length > 0) {
-            // Sort oldest to newest for the chart
             const sorted = data.data.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
             
-            // Filter to last 2 minutes (120 seconds)
-            const twoMinsAgo = new Date(Date.now() - 120 * 1000);
-            const recentData = sorted.filter(e => new Date(e.timestamp) > twoMinsAgo);
+            // Get last 30 entries to ensure we have enough data points
+            const recentData = sorted.slice(-40);
 
-            // Group by time interval (e.g. 10s buckets) to make a clean chart
-            // For simplicity, we just map the raw events into a chartable array
             const chartData = [];
             let currentTemp = 0;
             let currentOcc = 0;
@@ -64,7 +58,6 @@ function Dashboard({ onLogout, userEmail }) {
               });
             });
 
-            // Get latest values for the numeric display
             const latestReversed = [...sorted].reverse();
             
             setStats(prev => ({
@@ -85,11 +78,10 @@ function Dashboard({ onLogout, userEmail }) {
     };
 
     fetchAllStats();
-    const fetchInterval = setInterval(fetchAllStats, 10000); // Fetch every 10 seconds
+    const fetchInterval = setInterval(fetchAllStats, 10000); 
     return () => clearInterval(fetchInterval);
   }, [jwtToken]);
 
-  // Simulator Logic
   const toggleSimulator = () => {
     if (simulating) {
       clearInterval(simIntervalRef.current);
@@ -99,7 +91,7 @@ function Dashboard({ onLogout, userEmail }) {
     } else {
       setSimulating(true);
       injectRandomEvent();
-      simIntervalRef.current = setInterval(injectRandomEvent, 2500); // inject randomly
+      simIntervalRef.current = setInterval(injectRandomEvent, 2000); 
     }
   };
 
@@ -140,7 +132,6 @@ function Dashboard({ onLogout, userEmail }) {
     }
   };
 
-  // Cleanup simulator on unmount
   useEffect(() => {
     return () => {
       if (simIntervalRef.current) clearInterval(simIntervalRef.current);
@@ -151,15 +142,10 @@ function Dashboard({ onLogout, userEmail }) {
     <div className="full-layout">
       <header className="top-navbar">
         <h2 style={{ margin: 0, color: '#f1f5f9' }}>CampusPulse</h2>
-        
         <div className="header-actions">
-          <button 
-            className="btn btn-sim-toggle" 
-            onClick={() => setShowSimPanel(!showSimPanel)}
-          >
+          <button className="btn btn-sim-toggle" onClick={() => setShowSimPanel(!showSimPanel)}>
             {showSimPanel ? 'Close Simulator' : 'IoT Simulator Tools'}
           </button>
-          
           <span className="user-email">Welcome, <strong>{userEmail}</strong></span>
           <button onClick={onLogout} className="btn btn-stop">Sign Out</button>
         </div>
@@ -180,66 +166,83 @@ function Dashboard({ onLogout, userEmail }) {
         )}
 
         <section>
-          <div className="grid">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
             {BUILDINGS.map(bldg => {
               const bldgStats = stats[bldg];
-              const temp = bldgStats?.temp;
-              const occ = bldgStats?.occ;
-              const nrg = bldgStats?.nrg;
               const chartData = bldgStats?.chartData || [];
+              const lastTemp = bldgStats?.temp?.temperature_c || '--';
+              const lastOcc = bldgStats?.occ?.occupancy_count || '--';
+              const lastNrg = bldgStats?.nrg?.energy_kwh || '--';
 
               return (
-                <div className="tile" key={bldg} style={{ gridColumn: 'span 1' }}>
-                  <h3 style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    {bldg} 
-                    <span className="timestamp" style={{ fontSize: '0.75rem', fontWeight: 'normal' }}>
-                      {bldgStats?.lastUpdated ? `Live` : 'Waiting...'}
+                <div key={bldg} style={{ background: 'rgba(255,255,255,0.03)', padding: '25px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                  <h2 style={{ margin: '0 0 20px 0', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '10px', display: 'flex', justifyContent: 'space-between' }}>
+                    {bldg}
+                    <span style={{ fontSize: '14px', color: '#94a3b8', fontWeight: 'normal' }}>
+                      {bldgStats?.lastUpdated ? `Live - Last 40 events` : 'Waiting for telemetry...'}
                     </span>
-                  </h3>
-                  
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px' }}>
-                    <div className="metric" style={{ flex: 1, padding: 0, border: 'none' }}>
-                      <span className="metric-title" style={{ fontSize: '0.75rem' }}>Temp</span>
-                      <span className={`metric-val ${temp?.alert ? 'alert' : ''}`} style={{ fontSize: '1.2rem' }}>
-                        {temp ? `${temp.temperature_c} C` : '--'}
-                      </span>
-                    </div>
-                    <div className="metric" style={{ flex: 1, padding: 0, border: 'none' }}>
-                      <span className="metric-title" style={{ fontSize: '0.75rem' }}>Occupancy</span>
-                      <span className="metric-val" style={{ fontSize: '1.2rem', color: '#60a5fa' }}>
-                        {occ ? occ.occupancy_count : '--'}
-                      </span>
-                    </div>
-                    <div className="metric" style={{ flex: 1, padding: 0, border: 'none' }}>
-                      <span className="metric-title" style={{ fontSize: '0.75rem' }}>Energy</span>
-                      <span className="metric-val" style={{ fontSize: '1.2rem', color: '#10b981' }}>
-                        {nrg ? nrg.energy_kwh : '--'}
-                      </span>
-                    </div>
-                  </div>
+                  </h2>
 
-                  {/* The Live Chart */}
-                  <div style={{ width: '100%', height: 180, marginTop: '10px' }}>
-                    {chartData.length > 0 ? (
-                      <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={chartData}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                          <XAxis dataKey="time" stroke="#94a3b8" fontSize={10} tick={{fill: '#94a3b8'}} />
-                          <YAxis stroke="#94a3b8" fontSize={10} tick={{fill: '#94a3b8'}} width={30} />
-                          <Tooltip 
-                            contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '4px', color: '#fff' }}
-                            itemStyle={{ color: '#fff' }}
-                          />
-                          <Line type="monotone" dataKey="occ" name="Occupancy" stroke="#3b82f6" strokeWidth={2} dot={false} isAnimationActive={false} />
-                        </LineChart>
-                      </ResponsiveContainer>
-                    ) : (
-                      <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#475569' }}>
-                        No data yet
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px' }}>
+                    
+                    {/* Temperature Chart */}
+                    <div style={{ background: 'rgba(0,0,0,0.2)', padding: '15px', borderRadius: '8px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
+                        <span style={{ color: '#fbbf24', fontWeight: 'bold' }}>Temperature</span>
+                        <span style={{ color: '#f8fafc', fontSize: '1.2rem' }}>{lastTemp} °C</span>
                       </div>
-                    )}
-                  </div>
+                      <div style={{ width: '100%', height: 180 }}>
+                        <ResponsiveContainer>
+                          <LineChart data={chartData}>
+                            <XAxis dataKey="time" hide={true} />
+                            <YAxis domain={['dataMin - 2', 'dataMax + 2']} hide={true} />
+                            <Tooltip contentStyle={{ background: '#1e293b', border: 'none' }} />
+                            <ReferenceLine y={28} stroke="#ef4444" strokeDasharray="3 3" label={{ position: 'top', value: 'Alert > 28°C', fill: '#ef4444', fontSize: 10 }} />
+                            <Line type="monotone" dataKey="temp" stroke="#fbbf24" strokeWidth={3} dot={false} isAnimationActive={false} />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
 
+                    {/* Occupancy Chart */}
+                    <div style={{ background: 'rgba(0,0,0,0.2)', padding: '15px', borderRadius: '8px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
+                        <span style={{ color: '#60a5fa', fontWeight: 'bold' }}>Occupancy</span>
+                        <span style={{ color: '#f8fafc', fontSize: '1.2rem' }}>{lastOcc} People</span>
+                      </div>
+                      <div style={{ width: '100%', height: 180 }}>
+                        <ResponsiveContainer>
+                          <LineChart data={chartData}>
+                            <XAxis dataKey="time" hide={true} />
+                            <YAxis domain={[0, 220]} hide={true} />
+                            <Tooltip contentStyle={{ background: '#1e293b', border: 'none' }} />
+                            <ReferenceLine y={150} stroke="#ef4444" strokeDasharray="3 3" label={{ position: 'top', value: 'Capacity > 150', fill: '#ef4444', fontSize: 10 }} />
+                            <Line type="monotone" dataKey="occ" stroke="#60a5fa" strokeWidth={3} dot={false} isAnimationActive={false} />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+
+                    {/* Energy Chart */}
+                    <div style={{ background: 'rgba(0,0,0,0.2)', padding: '15px', borderRadius: '8px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
+                        <span style={{ color: '#10b981', fontWeight: 'bold' }}>Energy</span>
+                        <span style={{ color: '#f8fafc', fontSize: '1.2rem' }}>{lastNrg} kWh</span>
+                      </div>
+                      <div style={{ width: '100%', height: 180 }}>
+                        <ResponsiveContainer>
+                          <LineChart data={chartData}>
+                            <XAxis dataKey="time" hide={true} />
+                            <YAxis domain={['dataMin - 10', 'dataMax + 10']} hide={true} />
+                            <Tooltip contentStyle={{ background: '#1e293b', border: 'none' }} />
+                            <ReferenceLine y={120} stroke="#ef4444" strokeDasharray="3 3" label={{ position: 'top', value: 'High > 120 kWh', fill: '#ef4444', fontSize: 10 }} />
+                            <Line type="monotone" dataKey="nrg" stroke="#10b981" strokeWidth={3} dot={false} isAnimationActive={false} />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+
+                  </div>
                 </div>
               );
             })}
