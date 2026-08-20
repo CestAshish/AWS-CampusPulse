@@ -76,7 +76,7 @@ function Dashboard({ onLogout, userEmail }) {
     };
 
     fetchAllStats();
-    const fetchInterval = setInterval(fetchAllStats, 10000); 
+    const fetchInterval = setInterval(fetchAllStats, 3000); 
     return () => clearInterval(fetchInterval);
   }, [jwtToken]);
 
@@ -90,7 +90,7 @@ function Dashboard({ onLogout, userEmail }) {
       setSimulating(true);
       injectAllEvents();
       // Blast all 15 every 4 seconds
-      simIntervalRef.current = setInterval(injectAllEvents, 4000); 
+      simIntervalRef.current = setInterval(injectAllEvents, 3000); 
     }
   };
 
