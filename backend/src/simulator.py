@@ -30,14 +30,20 @@ def generate_payload():
     }
     
     if event_type == "occupancy":
-        payload["occupancy_count"] = random.randint(0, 500)
+        occupancy = random.randint(0, 500)
+        payload["occupancy_count"] = occupancy
+        if occupancy > 450:
+            payload["alert"] = True
     elif event_type == "temperature":
         temp = round(random.uniform(18.0, 30.0), 1)
         payload["temperature_c"] = temp
         if temp > 25.0:
             payload["alert"] = True
     elif event_type == "energy":
-        payload["energy_kwh"] = round(random.uniform(10.0, 100.0), 2)
+        energy = round(random.uniform(10.0, 100.0), 2)
+        payload["energy_kwh"] = energy
+        if energy > 90.0:
+            payload["alert"] = True
         
     return payload
 
