@@ -30,7 +30,8 @@ resource "aws_cloudwatch_log_group" "stats" {
 
 locals {
   lambda_vpc_config = var.lambda_in_vpc ? [{
-    subnet_ids         = data.aws_subnets.private.ids
+    # The lookup only sees private-subnet-b once it exists, so add it explicitly.
+    subnet_ids         = distinct(concat(data.aws_subnets.private.ids, [aws_subnet.private_b.id]))
     security_group_ids = aws_security_group.lambda[*].id
   }] : []
   # Every route table used by the private subnets must route DynamoDB traffic

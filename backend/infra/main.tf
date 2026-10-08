@@ -60,6 +60,23 @@ data "aws_subnets" "private" {
   }
 }
 
+# High availability: the console-built VPC has one private subnet (10.0.2.0/24,
+# eu-north-1a). A second private subnet in another availability zone lets the
+# Lambdas keep running if eu-north-1a fails. It shares the VPC's main route
+# table, which already routes DynamoDB traffic to the gateway endpoint.
+resource "aws_subnet" "private_b" {
+  vpc_id                  = data.aws_vpc.campuspulse.id
+  cidr_block              = "10.0.3.0/24"
+  availability_zone       = "eu-north-1b"
+  map_public_ip_on_launch = false
+  tags                    = { Name = "private-subnet-b" }
+}
+
+resource "aws_route_table_association" "private_b" {
+  subnet_id      = aws_subnet.private_b.id
+  route_table_id = one(data.aws_route_tables.main.ids)
+}
+
 # --- Private networking for the Lambdas ---------------------------------------
 # The private subnets have no NAT gateway (it is not Free Tier), so the only
 # outbound path is the free DynamoDB gateway endpoint. Metrics are emitted as
