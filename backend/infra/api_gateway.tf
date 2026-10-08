@@ -70,13 +70,67 @@ resource "aws_lambda_permission" "stats_apigw" {
   source_arn    = "${aws_api_gateway_rest_api.campus_api.execution_arn}/*/*"
 }
 
+# --- READ ROUTES (GET /events, GET /alerts) served by the Stats Lambda ---
+resource "aws_api_gateway_method" "events_get" {
+  rest_api_id   = aws_api_gateway_rest_api.campus_api.id
+  resource_id   = aws_api_gateway_resource.events.id
+  http_method   = "GET"
+  authorization = "COGNITO_USER_POOLS"
+  authorizer_id = aws_api_gateway_authorizer.cognito.id
+}
+
+resource "aws_api_gateway_integration" "events_get_lambda" {
+  rest_api_id             = aws_api_gateway_rest_api.campus_api.id
+  resource_id             = aws_api_gateway_resource.events.id
+  http_method             = aws_api_gateway_method.events_get.http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = aws_lambda_function.stats.invoke_arn
+}
+
+resource "aws_api_gateway_resource" "alerts" {
+  rest_api_id = aws_api_gateway_rest_api.campus_api.id
+  parent_id   = aws_api_gateway_rest_api.campus_api.root_resource_id
+  path_part   = "alerts"
+}
+
+resource "aws_api_gateway_method" "alerts_get" {
+  rest_api_id   = aws_api_gateway_rest_api.campus_api.id
+  resource_id   = aws_api_gateway_resource.alerts.id
+  http_method   = "GET"
+  authorization = "COGNITO_USER_POOLS"
+  authorizer_id = aws_api_gateway_authorizer.cognito.id
+}
+
+resource "aws_api_gateway_integration" "alerts_lambda" {
+  rest_api_id             = aws_api_gateway_rest_api.campus_api.id
+  resource_id             = aws_api_gateway_resource.alerts.id
+  http_method             = aws_api_gateway_method.alerts_get.http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = aws_lambda_function.stats.invoke_arn
+}
+
 # --- DEPLOYMENT ---
 resource "aws_api_gateway_deployment" "prod" {
   rest_api_id = aws_api_gateway_rest_api.campus_api.id
   
   triggers = {
-    redeployment = filemd5("${path.module}/api_gateway.tf")
+    redeployment = sha1(join(",", [
+      filemd5("${path.module}/api_gateway.tf"),
+      filemd5("${path.module}/auth.tf"),
+    ]))
   }
+
+  depends_on = [
+    aws_api_gateway_integration.events_lambda,
+    aws_api_gateway_integration.events_get_lambda,
+    aws_api_gateway_integration.stats_lambda,
+    aws_api_gateway_integration.alerts_lambda,
+    aws_api_gateway_integration.events_options_integration,
+    aws_api_gateway_integration.stats_options_integration,
+    aws_api_gateway_integration.alerts_options_integration,
+  ]
 
   lifecycle {
     create_before_destroy = true
@@ -87,6 +141,18 @@ resource "aws_api_gateway_stage" "prod" {
   deployment_id = aws_api_gateway_deployment.prod.id
   rest_api_id   = aws_api_gateway_rest_api.campus_api.id
   stage_name    = "prod"
+}
+
+# Throttling protects the backend (and the bill) from floods or a runaway simulator.
+resource "aws_api_gateway_method_settings" "all" {
+  rest_api_id = aws_api_gateway_rest_api.campus_api.id
+  stage_name  = aws_api_gateway_stage.prod.stage_name
+  method_path = "*/*"
+
+  settings {
+    throttling_rate_limit  = 50
+    throttling_burst_limit = 100
+  }
 }
 
 output "api_url" {
@@ -172,6 +238,46 @@ resource "aws_api_gateway_integration_response" "stats_options_integration_respo
     "method.response.header.Access-Control-Allow-Origin"  = "'*'"
   }
   depends_on = [aws_api_gateway_integration.stats_options_integration]
+}
+# --- CORS OPTIONS FOR /alerts ---
+resource "aws_api_gateway_method" "alerts_options" {
+  rest_api_id   = aws_api_gateway_rest_api.campus_api.id
+  resource_id   = aws_api_gateway_resource.alerts.id
+  http_method   = "OPTIONS"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "alerts_options_integration" {
+  rest_api_id = aws_api_gateway_rest_api.campus_api.id
+  resource_id = aws_api_gateway_resource.alerts.id
+  http_method = aws_api_gateway_method.alerts_options.http_method
+  type        = "MOCK"
+  request_templates = { "application/json" = "{\"statusCode\": 200}" }
+}
+
+resource "aws_api_gateway_method_response" "alerts_options_200" {
+  rest_api_id = aws_api_gateway_rest_api.campus_api.id
+  resource_id = aws_api_gateway_resource.alerts.id
+  http_method = aws_api_gateway_method.alerts_options.http_method
+  status_code = "200"
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = true,
+    "method.response.header.Access-Control-Allow-Methods" = true,
+    "method.response.header.Access-Control-Allow-Origin"  = true
+  }
+}
+
+resource "aws_api_gateway_integration_response" "alerts_options_integration_response" {
+  rest_api_id = aws_api_gateway_rest_api.campus_api.id
+  resource_id = aws_api_gateway_resource.alerts.id
+  http_method = aws_api_gateway_method.alerts_options.http_method
+  status_code = aws_api_gateway_method_response.alerts_options_200.status_code
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,Authorization'",
+    "method.response.header.Access-Control-Allow-Methods" = "'OPTIONS,POST,GET'",
+    "method.response.header.Access-Control-Allow-Origin"  = "'*'"
+  }
+  depends_on = [aws_api_gateway_integration.alerts_options_integration]
 }
 resource "aws_api_gateway_gateway_response" "default_4xx" {
   rest_api_id   = aws_api_gateway_rest_api.campus_api.id
