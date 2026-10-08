@@ -7,3 +7,5 @@ __pycache__/
 backend/infra/lambda.zip
 backend/infra/.terraform/
 *.tfstate*
+backend/scripts/smoke_test_local.py
+backend/scripts/.smoke_creds.json
