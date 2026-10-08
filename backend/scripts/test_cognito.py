@@ -8,8 +8,8 @@ import boto3
 
 REGION = "eu-north-1"
 
-USERNAME = "test_user@campuspulse.com"
-PASSWORD = "@User123"
+USERNAME = os.environ.get("COGNITO_USERNAME", "test_user@campuspulse.com")
+PASSWORD = os.environ["COGNITO_PASSWORD"]  # never commit real passwords
 CLIENT_ID = os.environ["COGNITO_CLIENT_ID"]
 CLIENT_SECRET = os.environ["COGNITO_CLIENT_SECRET"]
 

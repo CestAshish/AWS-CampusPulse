@@ -1,78 +1,54 @@
 # AWS-CampusPulse: Serverless IoT Monitoring Infrastructure
 
 ## 📖 Project Overview
-CampusPulse is a cloud-native, serverless IoT data ingestion and monitoring platform built on AWS. It allows campus administrators to collect, store, securely access, and analyze real-time telemetry data (such as temperature, building occupancy, and energy usage) from IoT sensors distributed across multiple campus buildings.
+CampusPulse is a cloud-native, serverless IoT data ingestion and monitoring platform built on AWS for the fictional NorthBridge University. It collects, validates, stores and analyses real-time telemetry (temperature, building occupancy and energy usage) from simulated sensors in five campus buildings, and gives operations staff a role-protected dashboard.
+
+It answers the operations team's questions directly:
+* **Which buildings are overloaded?** `GET /stats` flags buildings above the 150-person capacity.
+* **Which buildings consume the most energy?** `GET /stats` ranks buildings by average kWh.
+* **Are there unusual temperature or equipment events?** Every event is checked server-side; anomalies go to `GET /alerts`, CloudWatch alarms and an SNS email.
 
 ## 🎯 The Problem
-Modern university campuses consist of dozens of buildings, each with complex heating, electrical, and security needs. Tracking this data manually or through fragmented legacy systems is highly inefficient. 
+1. **Unpredictable traffic spikes:** sensors surge when classes end and go quiet at night.
+2. **Real-time alerting:** facility managers need immediate notice of fire-code occupancy breaches, temperature anomalies and power surges.
+3. **Data silos and security:** one secure, scalable backend must consolidate all sensor events without exposing compute or data to the internet.
 
-**The core challenges solved by this project include:**
-1. **Unpredictable Traffic Spikes:** IoT sensors generate massive traffic surges (e.g., when classes end and thousands of students trigger occupancy sensors), followed by long periods of silence at night.
-2. **Real-time Alerting Needs:** Facility managers require immediate, automated notifications if a building exceeds safe fire-code occupancy limits, experiences severe temperature anomalies, or shows signs of an electrical surge.
-3. **Data Silos & Security:** A unified, scalable, and highly secure backend is required to consolidate diverse sensor events into a single database without exposing the endpoints to the public internet.
+## 🏗️ Architecture
+100% serverless, deployed with Terraform from GitHub Actions, in `eu-north-1`. The architecture diagram is in the project docs.
 
-## 🏗️ Architecture & Design
-The infrastructure is 100% Serverless, deployed via Infrastructure as Code (Terraform), and adheres to AWS well-architected best practices for security and reliability.
-
-### Core AWS Components:
-* **Amazon API Gateway (The Front Door):** Exposes RESTful endpoints (`POST /events` for sensor ingestion, `GET /stats` for dashboard retrieval) with robust CORS policies mapped for browser compatibility.
-* **Amazon Cognito (Security):** Secures the API via a User Pool Authorizer, ensuring only authenticated administrative devices and verified sensors can interact with the system.
-* **AWS Lambda (Compute Layer):** Provides the business logic via Python 3.12 in two isolated microservices:
-  * `CampusPulse-Ingest`: Validates and processes incoming IoT payloads.
-  * `CampusPulse-Stats`: Handles heavy read operations and data aggregation for frontend dashboards.
-* **Amazon DynamoDB (Storage):** Serves as the primary NoSQL data store.
-  * *Primary Key:* `building_id` (Partition) and `timestamp` (Sort) for rapid, chronologically sorted queries per building.
-  * *Global Secondary Index (GSI):* Indexed on `event_type` to allow fleet-wide querying of specific anomalies (e.g., fetching all "High Temperature" events across the entire campus instantly).
-  * *Data Protection:* Point-In-Time-Recovery (PITR) is enabled for 35-day continuous backups.
-* **Amazon CloudWatch & SNS (Monitoring & Alerting):** Aggregates custom business metrics (`OccupancyCount`, `EnergyUsage`, `Temperature`) pushed by Lambda. Triggers automated SNS email alerts to administrators if predefined safety thresholds are breached.
+* **Amazon API Gateway (REST):** `POST /events`, `GET /stats`, `GET /events`, `GET /alerts`; Cognito authorizer on every route, CORS, stage throttling (50 req/s, burst 100).
+* **Amazon Cognito:** user pool with three groups — **Admin** (full access), **Staff** (read-only), **Sensor** (ingest only). Roles are enforced in the Lambdas from the verified JWT.
+* **AWS Lambda (Python 3.12), in private VPC subnets:**
+  * `CampusPulse-Ingest` — validates the payload, detects anomalies server-side, stores the event, emits metrics.
+  * `CampusPulse-Stats` — read API: per-building aggregates (avg/min/max/latest/anomalies), campus overview, recent events, alerts.
+* **VPC networking:** Lambdas run in private subnets with a dedicated security group (no inbound, HTTPS out to DynamoDB only). DynamoDB is reached through the free VPC gateway endpoint — no NAT gateway, no internet path.
+* **Amazon DynamoDB:** `CampusPulseEvents`, PK `building_id`, SK `timestamp`; `EventTypeIndex` GSI and sparse `AlertIndex` GSI; point-in-time recovery; 30-day TTL; encrypted at rest.
+* **Amazon CloudWatch + SNS:** custom metrics via Embedded Metric Format (`Temperature`, `OccupancyCount`, `EnergyUsage`, `AnomalyCount`), the `CampusPulse-Monitoring` dashboard, 8 alarms (API 5xx, Lambda errors/throttles, sensor thresholds) → email; 14-day log retention.
+* **AWS Budgets:** monthly cost budget with 80% actual / 100% forecast email alerts.
+* **Frontend:** React (Vite) dashboard with Amplify Auth and Recharts.
 
 ## ⚖️ Trade-offs & Design Decisions
+1. **Serverless (Lambda) vs. containers** — no servers to patch, multi-AZ by default, scale to zero at night; we accept occasional cold starts.
+2. **DynamoDB on-demand vs. provisioned** — campus traffic is spiky; on-demand avoids throttling at class changes without auto-scaling rules.
+3. **Two Lambdas instead of one** — a bug in the read path can never stop sensor ingestion.
+4. **NoSQL vs. RDS** — no joins needed; key design gives ordered per-building queries and fast writes, with no RDS instance to pay for.
+5. **Gateway endpoint + log-based metrics vs. NAT gateway** — keeps the Lambdas private for $0 instead of ≈ $35/month.
+6. **Server-side anomaly detection** — sensors cannot hide or fake alerts; thresholds live in one place (`backend/src/common.py`).
 
-1. **Serverless (Lambda) vs. Containers (ECS/EKS)**
-   * *Decision:* Serverless was chosen over container orchestration.
-   * *Trade-off:* We accept occasional minor "cold start" latency in exchange for **zero server maintenance**, built-in high availability across availability zones, and **scale-to-zero pricing** (crucial for cost-savings during quiet campus nights).
-2. **DynamoDB On-Demand vs. Provisioned Capacity**
-   * *Decision:* The database utilizes `PAY_PER_REQUEST` (On-Demand billing).
-   * *Trade-off:* While Provisioned Capacity might offer a lower baseline cost for highly predictable traffic, campus IoT data is extremely spiky. On-Demand pricing prevents API throttling during peak class changes and eliminates the need to manage complex auto-scaling rules.
-3. **Microservices vs. Monolithic Lambda**
-   * *Decision:* The Ingest and Stats logic are split into two completely separate Lambda functions.
-   * *Trade-off:* This slightly increases the Terraform deployment footprint. However, it ensures strict separation of concerns—if a bug is introduced into the dashboard analytics function (`Stats`), it will never bring down or interrupt critical sensor data ingestion (`Ingest`).
-4. **NoSQL vs. Relational Database (RDS)**
-   * *Decision:* DynamoDB (NoSQL) was selected over a relational database like PostgreSQL.
-   * *Trade-off:* We sacrifice complex SQL `JOIN` capabilities. In return, we gain sub-millisecond write performance and a flexible, schemaless structure capable of absorbing diverse, rapidly evolving IoT JSON payloads without requiring tedious database migrations.
+## ⚙️ Repository Layout
+* `backend/infra/` — Terraform: `main.tf` (provider, VPC lookups, Lambda security group, DynamoDB endpoint), `dynamodb.tf`, `iam.tf`, `lambda.tf`, `api_gateway.tf`, `auth.tf`, `cloudwatch.tf`, `budget.tf`.
+* `backend/src/` — `common.py` (schema, thresholds, roles), `ingest_handler.py`, `stats_handler.py`, `simulator.py` + `auth.py` (run locally, excluded from the Lambda zip).
+* `backend/tests/` — unit tests with moto-mocked DynamoDB and Cognito.
+* `backend/scripts/` — `setup_roles.py` (Cognito groups), `smoke_test.py` (end-to-end API test).
+* `frontend/` — React dashboard.
+* `.github/workflows/deploy.yml` — tests + build + `terraform plan` on PRs; `terraform apply` on merge to `main`.
 
-## ⚙️ Implementation Details
+## 🚀 Deployment
+See **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** for prerequisites, roles, deployment, the simulator, tests, the API reference, the disaster-recovery runbook and the cost table.
 
-### Project Organization
-The repository is organized strictly separating Infrastructure as Code (IaC) from Application Code:
-
-* `backend/infra/`: Contains all Terraform definitions to provision the AWS cloud environment.
-  * `main.tf`: Provider setup and VPC/Network existing data lookups.
-  * `dynamodb.tf`: Table schema, GSI, and automated backup configuration.
-  * `iam.tf`: Least-privilege IAM roles and access policies for Lambda execution.
-  * `lambda.tf`: Automated zipping and deployment of the Python compute layer.
-  * `api_gateway.tf`: API Routes, Lambda Integrations, CORS fallbacks, and production deployment stages.
-  * `auth.tf`: Integration with existing Cognito User Pools to secure the API.
-  * `cloudwatch.tf`: Custom metric alarms and automated SNS topic email subscriptions.
-* `src/`: Contains the application business logic.
-  * `ingest_handler.py`: Python logic for processing `POST /events`.
-  * `stats_handler.py`: Python logic for processing `GET /stats`.
-
-### Deployment Instructions
-1. Ensure you have Terraform `~> 5.0` and the AWS CLI installed and configured.
-2. Navigate to the infrastructure directory:
-   ```bash
-   cd backend/infra
-   ```
-3. Initialize the Terraform backend (configured for remote S3 state locking in `eu-north-1`):
-   ```bash
-   terraform init
-   ```
-4. Review the infrastructure plan to verify resources:
-   ```bash
-   terraform plan
-   ```
-5. Deploy to AWS:
-   ```bash
-   terraform apply
-   ```
+```bash
+cd backend/infra
+terraform init
+terraform plan
+terraform apply
+```

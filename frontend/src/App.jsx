@@ -1,86 +1,195 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { getCurrentUser, fetchAuthSession, signOut } from 'aws-amplify/auth';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import Login from './Login.jsx';
 
 const API_URL = "https://w1k2uj34k5.execute-api.eu-north-1.amazonaws.com/prod";
 const BUILDINGS = ["BLDG-A", "BLDG-B", "LIBRARY", "GYM", "Engineering"];
-const EVENT_TYPES = ["temperature", "occupancy", "energy"];
+const POLL_MS = 5000;
+
+// Must match EVENT_TYPES in backend/src/common.py and the CloudWatch alarms.
+const METRICS = {
+  temperature: { label: 'Temperature', field: 'temperature_c', unit: '°C', color: '#fbbf24', threshold: 28, thresholdLabel: 'Alert > 28°C', domain: ['dataMin - 2', 'dataMax + 2'] },
+  occupancy: { label: 'Occupancy', field: 'occupancy_count', unit: 'people', color: '#60a5fa', threshold: 150, thresholdLabel: 'Capacity > 150', domain: [0, 220] },
+  energy: { label: 'Energy', field: 'energy_kwh', unit: 'kWh', color: '#10b981', threshold: 120, thresholdLabel: 'Surge > 120 kWh', domain: ['dataMin - 10', 'dataMax + 10'] },
+};
+
+// Always ask Amplify for the session: it refreshes the ID token when it expires.
+async function getSession() {
+  const session = await fetchAuthSession();
+  const token = session.tokens?.idToken;
+  return { token: token?.toString(), groups: token?.payload?.['cognito:groups'] || [] };
+}
+
+async function api(path, params) {
+  const { token } = await getSession();
+  const query = params ? `?${new URLSearchParams(params)}` : '';
+  const res = await fetch(`${API_URL}${path}${query}`, { headers: { Authorization: token } });
+  if (!res.ok) throw new Error(`${path} returned ${res.status}`);
+  return res.json();
+}
+
+function randomReading(type) {
+  // Roughly 1 in 8 readings crosses a threshold so the alert pipeline is visible.
+  if (type === 'temperature') return +(19 + Math.random() * 10.5).toFixed(1);
+  if (type === 'occupancy') return Math.floor(20 + Math.random() * 150);
+  return +(40 + Math.random() * 90).toFixed(1);
+}
+
+function toChartData(events) {
+  const grouped = {};
+  events.forEach(item => {
+    const time = new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+    grouped[time] ??= { time };
+    const metric = METRICS[item.event_type];
+    if (metric && item[metric.field] !== undefined) grouped[time][metric.label] = parseFloat(item[metric.field]);
+  });
+  return Object.values(grouped);
+}
+
+function MetricChart({ type, chartData, summary }) {
+  const m = METRICS[type];
+  const latest = summary?.latest;
+  const over = latest !== undefined && latest > m.threshold;
+  return (
+    <div className="chart-card">
+      <div className="chart-head">
+        <span style={{ color: m.color, fontWeight: 'bold' }}>{m.label}</span>
+        <span className={over ? 'value over' : 'value'}>{latest ?? '--'} {m.unit}</span>
+      </div>
+      <div className="chart-sub">
+        {summary ? `avg ${summary.avg} · min ${summary.min} · max ${summary.max} · ${summary.anomalies} anomalies / ${summary.count}` : 'no readings yet'}
+      </div>
+      <div style={{ width: '100%', height: 170 }}>
+        <ResponsiveContainer>
+          <LineChart data={chartData}>
+            <XAxis dataKey="time" hide={true} />
+            <YAxis domain={m.domain} hide={true} />
+            <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', padding: '12px 18px', fontSize: '1.1rem', borderRadius: '8px' }} />
+            <ReferenceLine y={m.threshold} stroke="#ef4444" strokeDasharray="3 3" label={{ position: 'top', value: m.thresholdLabel, fill: '#ef4444', fontSize: 10 }} />
+            <Line type="monotone" dataKey={m.label} stroke={m.color} strokeWidth={3} dot={{ r: 3, fill: m.color, stroke: "none" }} activeDot={{ r: 6 }} connectNulls={true} isAnimationActive={false} />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+function CampusOverview({ campus, alerts }) {
+  const ranking = campus?.energy_ranking || [];
+  const overloaded = campus?.overloaded || [];
+  const maxEnergy = Math.max(1, ...ranking.map(r => r.avg_energy_kwh));
+  return (
+    <section className="overview-grid">
+      <div className="panel">
+        <h3>Energy ranking <span className="muted">avg kWh, recent readings</span></h3>
+        {ranking.length === 0 && <p className="muted">Waiting for telemetry...</p>}
+        {ranking.map(r => (
+          <div key={r.building_id} className="bar-row">
+            <span className="bar-label">{r.building_id}</span>
+            <div className="bar-track"><div className="bar-fill" style={{ width: `${(r.avg_energy_kwh / maxEnergy) * 100}%` }} /></div>
+            <span className="bar-value">{r.avg_energy_kwh}</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="panel">
+        <h3>Occupancy status <span className="muted">capacity 150</span></h3>
+        {overloaded.length === 0
+          ? <p className="ok">All buildings within capacity</p>
+          : overloaded.map(o => <p key={o.building_id} className="danger">{o.building_id}: {o.occupancy} people (overloaded)</p>)}
+      </div>
+
+      <div className="panel">
+        <h3>Latest alerts <span className="muted">server-side anomaly detection</span></h3>
+        {alerts.length === 0 && <p className="muted">No anomalies detected</p>}
+        <div className="alert-list">
+          {alerts.slice(0, 8).map(a => {
+            const m = METRICS[a.event_type];
+            return (
+              <div key={`${a.building_id}-${a.timestamp}`} className="alert-row">
+                <span className="danger">●</span>
+                <span>{new Date(a.timestamp).toLocaleTimeString()}</span>
+                <strong>{a.building_id}</strong>
+                <span>{m ? `${m.label} ${a[m.field]} ${m.unit}` : a.event_type}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
+}
 
 function Dashboard({ onLogout, userEmail }) {
   const [stats, setStats] = useState({});
+  const [campus, setCampus] = useState(null);
+  const [alerts, setAlerts] = useState([]);
+  const [groups, setGroups] = useState(null);
+  const [error, setError] = useState('');
   const [simulating, setSimulating] = useState(false);
   const [simLog, setSimLog] = useState("System Idle. Click 'Start Live Simulator' to begin.");
-  const [jwtToken, setJwtToken] = useState(null);
   const [showSimPanel, setShowSimPanel] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
   const simIntervalRef = useRef(null);
 
+  const isAdmin = groups?.includes('Admin');
+  const canRead = groups?.includes('Admin') || groups?.includes('Staff');
+  const role = isAdmin ? 'Admin' : groups?.includes('Staff') ? 'Staff (read-only)' : 'No role';
+
   useEffect(() => {
-    fetchAuthSession().then(session => {
-      const token = session.tokens.idToken.toString();
-      setJwtToken(token);
-      try {
-        // Decode the JWT payload to check Cognito groups
-        const payload = JSON.parse(atob(token.split('.')[1]));
-        const groups = payload['cognito:groups'] || [];
-        setIsAdmin(groups.includes('Admin'));
-      } catch (e) {
-        setIsAdmin(false);
-      }
-    }).catch(err => console.error("Error getting session", err));
+    getSession().then(s => setGroups(s.groups)).catch(err => console.error("Error getting session", err));
+  }, []);
+
+  const refresh = useCallback(async () => {
+    try {
+      const [overview, alertData, ...buildings] = await Promise.all([
+        api('/stats'),
+        api('/alerts', { limit: 20 }),
+        ...BUILDINGS.map(b => api('/stats', { building_id: b })),
+      ]);
+      setCampus(overview);
+      setAlerts(alertData.alerts || []);
+      const next = {};
+      buildings.forEach(b => {
+        next[b.building_id] = { summary: b.summary, chartData: toChartData(b.data || []), total: b.total_events };
+      });
+      setStats(next);
+      setError('');
+    } catch (err) {
+      console.error(err);
+      setError(`Could not refresh data (${err.message})`);
+    }
   }, []);
 
   useEffect(() => {
-    if (!jwtToken) return;
+    if (!canRead) return;
+    refresh();
+    const id = setInterval(refresh, POLL_MS);
+    return () => clearInterval(id);
+  }, [canRead, refresh]);
 
-    const fetchAllStats = async () => {
-      for (const bldg of BUILDINGS) {
+  const injectAllEvents = async () => {
+    setSimLog('Transmitting 15 sensor readings (5 buildings x 3 sensors)...');
+    const { token } = await getSession();
+    const results = await Promise.all(BUILDINGS.flatMap(bldg => Object.entries(METRICS).map(([type, m]) =>
+      // Spread the burst over 2.5s so it looks like independent devices.
+      new Promise(resolve => setTimeout(async () => {
         try {
-          const res = await fetch(`${API_URL}/stats?building_id=${bldg}`, {
-            headers: { 'Authorization': jwtToken }
+          const res = await fetch(`${API_URL}/events`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': token },
+            body: JSON.stringify({ building_id: bldg, event_type: type, timestamp: new Date().toISOString(), [m.field]: randomReading(type) }),
           });
-          if (!res.ok) continue;
-          const data = await res.json();
-          if (data.data && data.data.length > 0) {
-            const sorted = data.data.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-            const recentData = sorted.slice(-40);
-
-            const grouped = {};
-            recentData.forEach(item => {
-              const time = new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
-              if (!grouped[time]) {
-                grouped[time] = { time, Temperature: null, Occupancy: null, Energy: null };
-              }
-              if (item.event_type === 'temperature') grouped[time].Temperature = parseFloat(item.temperature_c);
-              if (item.event_type === 'occupancy') grouped[time].Occupancy = parseInt(item.occupancy_count);
-              if (item.event_type === 'energy') grouped[time].Energy = parseFloat(item.energy_kwh);
-            });
-            const chartData = Object.values(grouped);
-
-            const latestReversed = [...sorted].reverse();
-            
-            setStats(prev => ({
-              ...prev,
-              [bldg]: {
-                temp: latestReversed.find(e => e.event_type === 'temperature'),
-                occ: latestReversed.find(e => e.event_type === 'occupancy'),
-                nrg: latestReversed.find(e => e.event_type === 'energy'),
-                chartData: chartData,
-                lastUpdated: new Date().toLocaleTimeString()
-              }
-            }));
-          }
-        } catch (err) {
-          console.error(`Failed to fetch stats for ${bldg}`, err);
+          resolve(res.ok ? (await res.json()).severity : 'failed');
+        } catch {
+          resolve('failed');
         }
-      }
-    };
-
-    fetchAllStats();
-    const fetchInterval = setInterval(fetchAllStats, 3000); 
-    return () => clearInterval(fetchInterval);
-  }, [jwtToken]);
+      }, Math.random() * 2500))
+    )));
+    const anomalies = results.filter(r => r === 'critical').length;
+    const failed = results.filter(r => r === 'failed').length;
+    setSimLog(`Sent ${results.length - failed}/15 events · ${anomalies} anomalies detected by the API${failed ? ` · ${failed} failed` : ''}`);
+  };
 
   const toggleSimulator = () => {
     if (simulating) {
@@ -91,185 +200,74 @@ function Dashboard({ onLogout, userEmail }) {
     } else {
       setSimulating(true);
       injectAllEvents();
-      // Blast all 15 every 4 seconds
-      simIntervalRef.current = setInterval(injectAllEvents, 3000); 
+      simIntervalRef.current = setInterval(injectAllEvents, 3000);
     }
   };
 
-  const injectAllEvents = async () => {
-    if (!jwtToken) return;
-    
-    setSimLog(`Transmitting data for all 15 sensors simultaneously...`);
-    const promises = [];
-
-    for (const bldg of BUILDINGS) {
-      for (const type of EVENT_TYPES) {
-        // slight jitter so they don't hit the exact millisecond
-        const delay = Math.random() * 2500;
-        const p = new Promise(resolve => {
-          setTimeout(async () => {
-            const payload = {
-              building_id: bldg,
-              event_type: type,
-              timestamp: new Date().toISOString()
-            };
-
-            if (type === 'temperature') {
-              payload.temperature_c = (18 + Math.random() * 12).toFixed(1);
-              payload.alert = payload.temperature_c > 28;
-            } else if (type === 'occupancy') {
-              // Create a smooth varying graph
-              payload.occupancy_count = Math.floor(Math.random() * 150) + 10;
-            } else if (type === 'energy') {
-              payload.energy_kwh = (50 + Math.random() * 100).toFixed(1);
-            }
-
-            try {
-              await fetch(`${API_URL}/events`, {
-                method: 'POST',
-                headers: { 
-                  'Content-Type': 'application/json',
-                  'Authorization': jwtToken
-                },
-                body: JSON.stringify(payload)
-              });
-              resolve();
-            } catch (err) {
-              resolve();
-            }
-          }, delay);
-        });
-        promises.push(p);
-      }
-    }
-
-    await Promise.all(promises);
-    setSimLog(`Successfully transmitted 15 events to AWS DynamoDB.`);
-  };
-
-  useEffect(() => {
-    return () => {
-      if (simIntervalRef.current) clearInterval(simIntervalRef.current);
-    };
-  }, []);
+  useEffect(() => () => clearInterval(simIntervalRef.current), []);
 
   return (
     <div className="full-layout">
       <header className="top-navbar">
         <h2 style={{ margin: 0, color: '#f1f5f9' }}>CampusPulse</h2>
-        
+
         <div className="header-actions">
           {isAdmin && (
-            <button 
-              className="btn btn-sim-toggle" 
-              onClick={() => setShowSimPanel(!showSimPanel)}
-            >
+            <button className="btn btn-sim-toggle" onClick={() => setShowSimPanel(!showSimPanel)}>
               {showSimPanel ? 'Close Simulator' : 'IoT Simulator Tools'}
             </button>
           )}
-          
+          <span className="role-badge">{role}</span>
           <span className="user-email">Welcome, <strong>{userEmail}</strong></span>
           <button onClick={onLogout} className="btn btn-stop">Sign Out</button>
         </div>
       </header>
 
       <main className="main-content-full">
-        {showSimPanel && (
+        {showSimPanel && isAdmin && (
           <div className="simulator-dropdown">
             <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
               <button className={`btn ${simulating ? 'btn-stop' : ''}`} onClick={toggleSimulator}>
                 {simulating ? 'Stop Simulator' : 'Start Live Simulator'}
               </button>
-              <div className="sim-log" style={{ color: simulating ? '#10b981' : '#94a3b8' }}>
-                {simLog}
-              </div>
+              <div className="sim-log" style={{ color: simulating ? '#10b981' : '#94a3b8' }}>{simLog}</div>
             </div>
           </div>
         )}
 
-        <section>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
-            {BUILDINGS.map(bldg => {
-              const bldgStats = stats[bldg];
-              const chartData = bldgStats?.chartData || [];
-              const lastTemp = bldgStats?.temp?.temperature_c || '--';
-              const lastOcc = bldgStats?.occ?.occupancy_count || '--';
-              const lastNrg = bldgStats?.nrg?.energy_kwh || '--';
+        {groups && !canRead && (
+          <div className="panel">
+            <h3>No dashboard access</h3>
+            <p className="muted">Your account is not in the Admin or Staff group. Ask an administrator to assign a role.</p>
+          </div>
+        )}
 
+        {error && <p className="danger">{error}</p>}
+
+        {canRead && <CampusOverview campus={campus} alerts={alerts} />}
+
+        {canRead && (
+          <section style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
+            {BUILDINGS.map(bldg => {
+              const b = stats[bldg];
               return (
-                <div key={bldg} style={{ background: 'rgba(255,255,255,0.03)', padding: '25px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                  <h2 style={{ margin: '0 0 20px 0', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '10px', display: 'flex', justifyContent: 'space-between' }}>
+                <div key={bldg} className="building-card">
+                  <h2 className="building-head">
                     {bldg}
-                    <span style={{ fontSize: '14px', color: '#94a3b8', fontWeight: 'normal' }}>
-                      {bldgStats?.lastUpdated ? `Live - Last 40 events` : 'Waiting for telemetry...'}
+                    <span className="muted" style={{ fontSize: '14px', fontWeight: 'normal' }}>
+                      {b?.total ? `Live · aggregates over last ${b.total} events` : 'Waiting for telemetry...'}
                     </span>
                   </h2>
-
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px' }}>
-                    
-                    {/* Temperature Chart */}
-                    <div style={{ background: 'rgba(0,0,0,0.2)', padding: '15px', borderRadius: '8px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-                        <span style={{ color: '#fbbf24', fontWeight: 'bold' }}>Temperature</span>
-                        <span style={{ color: '#f8fafc', fontSize: '1.2rem' }}>{lastTemp} °C</span>
-                      </div>
-                      <div style={{ width: '100%', height: 180 }}>
-                        <ResponsiveContainer>
-                          <LineChart data={chartData}>
-                            <XAxis dataKey="time" hide={true} />
-                            <YAxis domain={['dataMin - 2', 'dataMax + 2']} hide={true} />
-                            <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', padding: '12px 18px', fontSize: '1.1rem', borderRadius: '8px' }} />
-                            <ReferenceLine y={28} stroke="#ef4444" strokeDasharray="3 3" label={{ position: 'top', value: 'Alert > 28°C', fill: '#ef4444', fontSize: 10 }} />
-                            <Line type="monotone" dataKey="Temperature" stroke="#fbbf24" strokeWidth={3} dot={{r: 3, fill: "#fbbf24", stroke: "none"}} activeDot={{r: 6}} connectNulls={true} isAnimationActive={false} />
-                          </LineChart>
-                        </ResponsiveContainer>
-                      </div>
-                    </div>
-
-                    {/* Occupancy Chart */}
-                    <div style={{ background: 'rgba(0,0,0,0.2)', padding: '15px', borderRadius: '8px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-                        <span style={{ color: '#60a5fa', fontWeight: 'bold' }}>Occupancy</span>
-                        <span style={{ color: '#f8fafc', fontSize: '1.2rem' }}>{lastOcc} People</span>
-                      </div>
-                      <div style={{ width: '100%', height: 180 }}>
-                        <ResponsiveContainer>
-                          <LineChart data={chartData}>
-                            <XAxis dataKey="time" hide={true} />
-                            <YAxis domain={[0, 220]} hide={true} />
-                            <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', padding: '12px 18px', fontSize: '1.1rem', borderRadius: '8px' }} />
-                            <ReferenceLine y={150} stroke="#ef4444" strokeDasharray="3 3" label={{ position: 'top', value: 'Capacity > 150', fill: '#ef4444', fontSize: 10 }} />
-                            <Line type="monotone" dataKey="Occupancy" stroke="#60a5fa" strokeWidth={3} dot={{r: 3, fill: "#60a5fa", stroke: "none"}} activeDot={{r: 6}} connectNulls={true} isAnimationActive={false} />
-                          </LineChart>
-                        </ResponsiveContainer>
-                      </div>
-                    </div>
-
-                    {/* Energy Chart */}
-                    <div style={{ background: 'rgba(0,0,0,0.2)', padding: '15px', borderRadius: '8px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-                        <span style={{ color: '#10b981', fontWeight: 'bold' }}>Energy</span>
-                        <span style={{ color: '#f8fafc', fontSize: '1.2rem' }}>{lastNrg} kWh</span>
-                      </div>
-                      <div style={{ width: '100%', height: 180 }}>
-                        <ResponsiveContainer>
-                          <LineChart data={chartData}>
-                            <XAxis dataKey="time" hide={true} />
-                            <YAxis domain={['dataMin - 10', 'dataMax + 10']} hide={true} />
-                            <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', padding: '12px 18px', fontSize: '1.1rem', borderRadius: '8px' }} />
-                            <ReferenceLine y={120} stroke="#ef4444" strokeDasharray="3 3" label={{ position: 'top', value: 'High > 120 kWh', fill: '#ef4444', fontSize: 10 }} />
-                            <Line type="monotone" dataKey="Energy" stroke="#10b981" strokeWidth={3} dot={{r: 3, fill: "#10b981", stroke: "none"}} activeDot={{r: 6}} connectNulls={true} isAnimationActive={false} />
-                          </LineChart>
-                        </ResponsiveContainer>
-                      </div>
-                    </div>
-
+                    {Object.keys(METRICS).map(type => (
+                      <MetricChart key={type} type={type} chartData={b?.chartData || []} summary={b?.summary?.[type]} />
+                    ))}
                   </div>
                 </div>
               );
             })}
-          </div>
-        </section>
+          </section>
+        )}
       </main>
     </div>
   );
@@ -285,7 +283,7 @@ function App() {
       try {
         const user = await getCurrentUser();
         setIsLoggedIn(true);
-        setUserEmail(user.username || user.signInDetails?.loginId || 'Admin');
+        setUserEmail(user.signInDetails?.loginId || user.username || 'User');
       } catch {
         setIsLoggedIn(false);
       } finally {
@@ -301,7 +299,7 @@ function App() {
 
   if (!isLoggedIn) {
     return <Login onLogin={() => {
-      getCurrentUser().then(user => setUserEmail(user.username || user.signInDetails?.loginId || 'Admin'));
+      getCurrentUser().then(user => setUserEmail(user.signInDetails?.loginId || user.username || 'User'));
       setIsLoggedIn(true);
     }} />;
   }

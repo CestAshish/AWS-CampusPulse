@@ -1,10 +1,19 @@
 [project]
 name = "backend"
 version = "0.1.0"
-description = "Add your description here"
+description = "CampusPulse serverless backend (Lambda handlers, simulator, tests)"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 dependencies = [
     "boto3>=1.43.75",
     "requests>=2.34.2",
 ]
+
+[dependency-groups]
+dev = [
+    "moto[cognitoidp,dynamodb]>=5.2.3",
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,1 +1,9 @@
 .idea/
+.DS_Store
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+backend/infra/lambda.zip
+backend/infra/.terraform/
+*.tfstate*
