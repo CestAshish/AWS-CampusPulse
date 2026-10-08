@@ -9,7 +9,7 @@ These existed before the Terraform code and are looked up, not created:
 | Resource | Name / tag | Notes |
 |---|---|---|
 | S3 bucket for Terraform state | `campuspulse-tfstate-2026` | Versioning on, public access blocked |
-| VPC | tag `Name = CampusPulse-VPC` | Private subnets tagged `*private*`, no NAT gateway |
+| VPC | tag `Name = CampusPulse-VPC`, `10.0.0.0/16` | `private-subnet` `10.0.2.0/24` (eu-north-1a); `public-subnet` `10.0.1.0/24` unused; no NAT or internet gateway. Terraform adds `private-subnet-b` `10.0.3.0/24` (eu-north-1b) so the Lambdas span two zones |
 | DynamoDB gateway endpoint | `com.amazonaws.eu-north-1.dynamodb` | Must be attached to the private subnets' route table(s). Terraform checks this and refuses to deploy otherwise. Set `manage_dynamodb_endpoint = true` to let Terraform create it. |
 | Cognito user pool | `campuspulse-user-pool` | Email sign-in, public app client (no secret), `USER_PASSWORD_AUTH` enabled for the simulator |
 | GitHub secrets | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | Deployment IAM user |
