@@ -63,6 +63,17 @@ The bundle is static and is deployed by the hosting provider's GitHub integratio
 
 ## 4. Simulated campus data
 
+From a laptop, the simplest way is the runner, which asks for the sensor login once and saves it in a git-ignored file:
+
+```bash
+cd backend
+uv run python scripts/run_sensors.py                            # one reading per building per second
+uv run python scripts/run_sensors.py --rounds 40 --interval 0   # burst test, 200 events
+uv run python scripts/run_sensors.py --setup                    # change the saved login
+```
+
+Or call the simulator directly with environment variables:
+
 ```bash
 cd backend/src
 export COGNITO_CLIENT_ID=... COGNITO_USERNAME=sensor@campuspulse.com COGNITO_PASSWORD=...
